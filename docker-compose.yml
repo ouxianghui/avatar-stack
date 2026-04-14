@@ -1,0 +1,80 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: avatar-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+  coturn:
+    image: coturn/coturn:4.6.3
+    container_name: avatar-coturn
+    restart: unless-stopped
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
+
+  mediamtx:
+    image: bluenviron/mediamtx:1
+    container_name: avatar-mediamtx
+    restart: unless-stopped
+    depends_on:
+      - coturn
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      - "8554:8554/tcp"
+      - "8889:8889/tcp"
+      - "8189:8189/udp"
+      - "8189:8189/tcp"
+      - "9997:9997/tcp"
+      - "9998:9998/tcp"
+
+  session-api:
+    build:
+      context: ./session-api
+    container_name: avatar-session-api
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - mediamtx
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      MEDIAMTX_WEBRTC_BASE_URL: ${MEDIAMTX_WEBRTC_BASE_URL:-http://localhost:8889}
+      MEDIAMTX_RTSP_BASE_URL: rtsp://mediamtx:8554
+      WHIP_USERNAME: ${WHIP_USERNAME:-publisher}
+      WHIP_PASSWORD: ${WHIP_PASSWORD:-publisher-pass}
+      WHEP_USERNAME: ${WHEP_USERNAME:-viewer}
+      WHEP_PASSWORD: ${WHEP_PASSWORD:-viewer-pass}
+      WORKER_RTSP_USER: ${WORKER_RTSP_USER:-worker}
+      WORKER_RTSP_PASS: ${WORKER_RTSP_PASS:-worker-pass}
+      START_QUEUE: avatar:sessions:start
+      STOP_QUEUE: avatar:sessions:stop
+    ports:
+      - "8080:8080"
+
+  soulx-worker:
+    build:
+      context: ./worker
+    container_name: avatar-soulx-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - mediamtx
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      START_QUEUE: avatar:sessions:start
+      STOP_QUEUE: avatar:sessions:stop
+      WORKER_MODE: ${WORKER_MODE:-passthrough}
+      WORKER_RTSP_USER: ${WORKER_RTSP_USER:-worker}
+      WORKER_RTSP_PASS: ${WORKER_RTSP_PASS:-worker-pass}
+      MEDIAMTX_HOST: mediamtx
+      MEDIAMTX_RTSP_PORT: "8554"
+
+volumes:
+  redis-data:

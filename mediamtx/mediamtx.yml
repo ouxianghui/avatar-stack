@@ -1,0 +1,71 @@
+logLevel: info
+
+api: yes
+apiAddress: :9997
+
+metrics: yes
+metricsAddress: :9998
+
+# Current default uses internal static credentials for easy local startup.
+# For production, switch to authMethod: http and delegate policy to session-api.
+authMethod: internal
+# authMethod: http
+# authHTTPAddress: http://session-api:8080/internal/mediamtx/auth
+authInternalUsers:
+  - user: publisher
+    pass: publisher-pass
+    permissions:
+      - action: publish
+        path: ~^avatar/[^/]+/in$
+
+  - user: viewer
+    pass: viewer-pass
+    permissions:
+      - action: read
+        path: ~^avatar/[^/]+/out$
+
+  - user: worker
+    pass: worker-pass
+    permissions:
+      - action: read
+        path: ~^avatar/[^/]+/in$
+      - action: publish
+        path: ~^avatar/[^/]+/out$
+
+  - user: api
+    pass: api-pass
+    ips: ['127.0.0.1', '::1']
+    permissions:
+      - action: api
+      - action: metrics
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no
+webrtcAllowOrigin: '*'
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcAdditionalHosts: [localhost]
+webrtcICEServers2:
+  - url: stun:stun.l.google.com:19302
+  - url: turn:localhost:3478?transport=udp
+    username: AUTH_SECRET
+    password: turn-shared-secret
+    clientOnly: true
+  - url: turn:localhost:3478?transport=tcp
+    username: AUTH_SECRET
+    password: turn-shared-secret
+    clientOnly: true
+
+rtsp: yes
+rtspAddress: :8554
+rtspTransport: [tcp, udp]
+
+pathDefaults:
+  source: publisher
+  sourceOnDemand: no
+  # Example production hooks:
+  # runOnReady: curl -s -X POST "http://session-api:8080/internal/mediamtx/hooks/on-ready?path=$MTX_PATH"
+  # runOnNotReady: curl -s -X POST "http://session-api:8080/internal/mediamtx/hooks/on-not-ready?path=$MTX_PATH"
+  # runOnRead: curl -s -X POST "http://session-api:8080/internal/mediamtx/hooks/on-read?path=$MTX_PATH"
+  # runOnUnread: curl -s -X POST "http://session-api:8080/internal/mediamtx/hooks/on-unread?path=$MTX_PATH"
