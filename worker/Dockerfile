@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+# Default: AWS Public ECR mirror of Docker Official (avoids flaky registry-1.docker.io). Override: --build-arg PYTHON_IMAGE=python:3.11-slim
+ARG PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.11-slim
+FROM ${PYTHON_IMAGE}
 
 WORKDIR /app
 

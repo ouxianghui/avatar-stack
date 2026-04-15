@@ -1,3 +1,7 @@
+networks:
+  avatar-net:
+    driver: bridge
+
 services:
   redis:
     image: redis:7.2-alpine
@@ -6,6 +10,8 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
+    networks:
+      - avatar-net
 
   coturn:
     image: coturn/coturn:4.6.3
@@ -14,19 +20,28 @@ services:
     command: ["-c", "/etc/coturn/turnserver.conf"]
     volumes:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    networks:
+      - avatar-net
     ports:
       - "3478:3478/tcp"
       - "3478:3478/udp"
       - "49160-49200:49160-49200/udp"
 
+  # Pin patch version: >=1.16.2 fixes RTSP publish 400 when a reader polls /in concurrently (#5095).
   mediamtx:
-    image: bluenviron/mediamtx:1
+    build:
+      context: ./mediamtx
+      dockerfile: Dockerfile
+    image: avatar-mediamtx:1.17.1
     container_name: avatar-mediamtx
     restart: unless-stopped
+    command: ["/mediamtx.yml"]
     depends_on:
       - coturn
     volumes:
       - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    networks:
+      - avatar-net
     ports:
       - "8554:8554/tcp"
       - "8889:8889/tcp"
@@ -43,6 +58,8 @@ services:
     depends_on:
       - redis
       - mediamtx
+    networks:
+      - avatar-net
     environment:
       REDIS_URL: redis://redis:6379/0
       MEDIAMTX_WEBRTC_BASE_URL: ${MEDIAMTX_WEBRTC_BASE_URL:-http://localhost:8889}
@@ -66,6 +83,8 @@ services:
     depends_on:
       - redis
       - mediamtx
+    networks:
+      - avatar-net
     environment:
       REDIS_URL: redis://redis:6379/0
       START_QUEUE: avatar:sessions:start
@@ -75,6 +94,13 @@ services:
       WORKER_RTSP_PASS: ${WORKER_RTSP_PASS:-worker-pass}
       MEDIAMTX_HOST: mediamtx
       MEDIAMTX_RTSP_PORT: "8554"
+      MEDIAMTX_CONTROL_API_BASE: http://mediamtx:9997
+      MEDIAMTX_API_USER: api
+      MEDIAMTX_API_PASS: api-pass
+      WAIT_PUBLISHER_TIMEOUT_S: "300"
+      WAIT_PUBLISHER_NO_PUBLISHER_RETRY_S: "15"
+      # SoulX-FlashHead: use Dockerfile.soulx + GPU + model mounts; set to 0 to run inference.
+      SOULX_DRY_RUN: "1"
 
 volumes:
   redis-data:

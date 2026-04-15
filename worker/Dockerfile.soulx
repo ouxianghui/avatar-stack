@@ -1,0 +1,49 @@
+# GPU-capable worker for WORKER_MODE=soulx. Host needs NVIDIA driver + nvidia-container-toolkit; run with --gpus all.
+# PyTorch cu128 wheels ship CUDA user-mode libraries; a slim Python image is enough when the GPU is passed through.
+# SoulX upstream torch.compile needs libcuda at Triton link time; slim images lack it. soulx_runner / verify default
+# SOULX_TORCH_COMPILE=0 (compile off). For compile=1 use an nvidia/cuda:*-devel base or install CUDA stub libs.
+#
+# Build (from worker/):
+#   docker build -f Dockerfile.soulx -t avatar-soulx-worker:gpu .
+#
+# Mount checkpoints at runtime, e.g.:
+#   -v ./models/SoulX-FlashHead-1_3B:/models/SoulX-FlashHead-1_3B:ro
+#   -v ./models/wav2vec2-base-960h:/models/wav2vec2-base-960h:ro
+#
+# Optional FlashAttention (slow source build): --build-arg INSTALL_FLASH_ATTN=1
+#
+# Default base is AWS Public ECR mirror of Docker Official Python (same as worker/Dockerfile) to avoid Docker Hub resets.
+# Override if Hub works for you: --build-arg PYTHON_IMAGE=python:3.10-slim
+
+ARG PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.10-slim
+FROM ${PYTHON_IMAGE}
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg git ninja-build build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# PyTorch cu128 index alone breaks pip on typing-extensions (wheel Name vs project name). Pull deps from PyPI too.
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
+ARG PYPI_INDEX_URL=https://pypi.org/simple
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir torch==2.7.1 torchvision==0.22.1 \
+        --index-url "${TORCH_INDEX_URL}" \
+        --extra-index-url "${PYPI_INDEX_URL}"
+
+COPY third_party/SoulX-FlashHead /app/third_party/SoulX-FlashHead
+COPY requirements-soulx.txt /app/requirements-soulx.txt
+RUN pip install --no-cache-dir -r /app/requirements-soulx.txt
+
+ARG INSTALL_FLASH_ATTN=0
+RUN if [ "$INSTALL_FLASH_ATTN" = "1" ]; then \
+      pip install --no-cache-dir flash_attn==2.8.0.post2 --no-build-isolation; \
+    fi
+
+COPY app /app/app
+
+ENV PYTHONPATH=/app
+ENV SOULX_REPO_ROOT=/app/third_party/SoulX-FlashHead
+
+CMD ["python", "-m", "app.worker"]

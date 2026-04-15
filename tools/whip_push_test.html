@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WHIP Push Test</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .row { margin-bottom: 10px; display: flex; gap: 10px; align-items: center; }
+    label { min-width: 120px; }
+    input[type="text"], input[type="password"] { width: 560px; max-width: 92vw; }
+    button { padding: 6px 12px; }
+    video { width: min(960px, 92vw); background: #111; margin-top: 12px; }
+    pre { background: #f4f4f4; padding: 10px; max-width: min(960px, 92vw); overflow: auto; }
+  </style>
+</head>
+<body>
+  <h2>MediaMTX WHIP Push Test</h2>
+  <p style="color:#444;font-size:14px;max-width:min(960px,92vw);line-height:1.45">
+    Open this page over <strong>http://</strong> (e.g. run <code>python3 -m http.server 8765</code> in the <code>tools</code> folder), not <code>file://</code> — otherwise the browser may block camera/mic and WHIP will not publish.
+    Use the <strong>exact same session_id</strong> as in your WHEP URL (copy both from one <code>POST /sessions</code> response). Keep WHIP running before starting WHEP.
+    Optional: open with <code>?session=&lt;uuid&gt;</code> to fill the URL automatically.
+  </p>
+
+  <div class="row">
+    <label for="url">WHIP URL</label>
+    <input id="url" type="text" value="" placeholder="http://localhost:8889/avatar/&lt;session_id&gt;/in/whip" />
+  </div>
+  <div class="row">
+    <label for="user">Username</label>
+    <input id="user" type="text" value="publisher" />
+  </div>
+  <div class="row">
+    <label for="pass">Password</label>
+    <input id="pass" type="password" value="publisher-pass" />
+  </div>
+  <div class="row">
+    <label><input id="sendAudio" type="checkbox" checked /> Send audio</label>
+    <label><input id="sendVideo" type="checkbox" checked /> Send video</label>
+  </div>
+  <div class="row">
+    <button id="start">Start WHIP</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+
+  <video id="preview" autoplay playsinline muted controls></video>
+  <pre id="log"></pre>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const logEl = $("log");
+    const previewEl = $("preview");
+    const startBtn = $("start");
+    const stopBtn = $("stop");
+
+    let pc = null;
+    let stream = null;
+    let sessionUrl = null;
+
+    function log(msg) {
+      const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.textContent += `${line}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(line);
+    }
+
+    function basicAuthHeader(user, pass) {
+      if (!user && !pass) return null;
+      return `Basic ${btoa(`${user}:${pass}`)}`;
+    }
+
+    async function createLocalStream() {
+      const audio = $("sendAudio").checked;
+      const video = $("sendVideo").checked;
+      if (!audio && !video) {
+        throw new Error("Enable at least one track (audio or video).");
+      }
+      return navigator.mediaDevices.getUserMedia({ audio, video });
+    }
+
+    async function start() {
+      if (pc) {
+        log("Already running.");
+        return;
+      }
+
+      const whipUrl = $("url").value.trim();
+      const user = $("user").value;
+      const pass = $("pass").value;
+      const auth = basicAuthHeader(user, pass);
+
+      if (!whipUrl) {
+        log("WHIP URL is required.");
+        return;
+      }
+
+      try {
+        stream = await createLocalStream();
+        previewEl.srcObject = stream;
+
+        pc = new RTCPeerConnection();
+        pc.oniceconnectionstatechange = () => log(`ICE state: ${pc.iceConnectionState}`);
+        pc.onconnectionstatechange = () => log(`PC state: ${pc.connectionState}`);
+
+        for (const track of stream.getTracks()) {
+          pc.addTrack(track, stream);
+          log(`Track added: kind=${track.kind}`);
+        }
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const headers = { "Content-Type": "application/sdp" };
+        if (auth) headers["Authorization"] = auth;
+
+        const res = await fetch(whipUrl, {
+          method: "POST",
+          headers,
+          body: offer.sdp,
+        });
+
+        if (!res.ok) {
+          const body = await res.text();
+          throw new Error(`WHIP POST failed ${res.status}: ${body}`);
+        }
+
+        const location = res.headers.get("Location");
+        sessionUrl = location ? new URL(location, whipUrl).toString() : null;
+        if (sessionUrl) log(`WHIP session: ${sessionUrl}`);
+
+        const answerSdp = await res.text();
+        await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+        log("WHIP connected.");
+
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      } catch (err) {
+        log(`Start error: ${err.message}`);
+        await stop();
+      }
+    }
+
+    async function stop() {
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+
+      if (stream) {
+        for (const t of stream.getTracks()) t.stop();
+        stream = null;
+      }
+
+      previewEl.srcObject = null;
+
+      const user = $("user").value;
+      const pass = $("pass").value;
+      const auth = basicAuthHeader(user, pass);
+      if (sessionUrl) {
+        try {
+          const headers = {};
+          if (auth) headers["Authorization"] = auth;
+          await fetch(sessionUrl, { method: "DELETE", headers });
+          log("WHIP session deleted.");
+        } catch (err) {
+          log(`Session delete warning: ${err.message}`);
+        }
+      }
+
+      sessionUrl = null;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    startBtn.addEventListener("click", start);
+    stopBtn.addEventListener("click", stop);
+    window.addEventListener("beforeunload", () => { if (pc || sessionUrl) stop(); });
+
+    (function applySessionQuery() {
+      const sid = new URLSearchParams(location.search).get("session");
+      if (!sid || !/^[0-9a-f-]{36}$/i.test(sid.trim())) return;
+      const id = sid.trim();
+      const el = $("url");
+      if (!el.value.trim()) {
+        el.value = `http://localhost:8889/avatar/${id}/in/whip`;
+      }
+    })();
+  </script>
+</body>
+</html>

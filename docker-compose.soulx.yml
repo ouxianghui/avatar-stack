@@ -1,0 +1,22 @@
+# Optional GPU stack for SoulX-FlashHead worker.
+# Use together with docker-compose.yml (does not replace the base file).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.soulx.yml up -d --build
+#
+# Prerequisites: NVIDIA driver + nvidia-container-toolkit; GPU visible via `docker run --rm --gpus all … nvidia-smi`
+# Models: under worker/third_party/SoulX-FlashHead/models/ (see SoulX README) after `git submodule update --init`
+
+services:
+  soulx-worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile.soulx
+    gpus: all
+    environment:
+      SOULX_DRY_RUN: ${SOULX_DRY_RUN:-0}
+      SOULX_REPO_ROOT: /app/third_party/SoulX-FlashHead
+      SOULX_CKPT_DIR: ${SOULX_CKPT_DIR:-/app/third_party/SoulX-FlashHead/models/SoulX-FlashHead-1_3B}
+      SOULX_WAV2VEC_DIR: ${SOULX_WAV2VEC_DIR:-/app/third_party/SoulX-FlashHead/models/wav2vec2-base-960h}
+      TORCHDYNAMO_DISABLE: ${TORCHDYNAMO_DISABLE:-1}
+    volumes:
+      - ./worker/third_party/SoulX-FlashHead:/app/third_party/SoulX-FlashHead:ro

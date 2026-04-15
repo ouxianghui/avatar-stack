@@ -66,6 +66,51 @@ Response example:
 }
 ```
 
+### 2b. Passthrough smoke test (publish to `/in`, play `/out`)
+
+After `POST /sessions`, the worker **waits until something is publishing on `/in`** (via MediaMTX control API), then starts passthrough. Publish **after** the session exists.
+
+**1) RTSP publish — try video-only first** (avoids many `400 Bad Request` failures from FFmpeg’s RTSP + mono-AAC SDP against MediaMTX):
+
+```bash
+SESSION_ID='<paste session_id from JSON>'
+
+ffmpeg -re -f lavfi -i testsrc=size=640x480:rate=30 \
+  -pix_fmt yuv420p -c:v libx264 -preset ultrafast -tune zerolatency \
+  -an -f rtsp -rtsp_transport tcp \
+  "rtsp://publisher:publisher-pass@127.0.0.1:8554/avatar/${SESSION_ID}/in"
+```
+
+**2) RTSP publish — H.264 + AAC (stereo)** if you need audio:
+
+```bash
+ffmpeg -re -f lavfi -i testsrc=size=640x480:rate=30 \
+  -f lavfi -i sine=frequency=1000:sample_rate=48000 \
+  -pix_fmt yuv420p -c:v libx264 -preset ultrafast -tune zerolatency \
+  -c:a aac -ar 48000 -ac 2 -b:a 128k \
+  -f rtsp -rtsp_transport tcp \
+  "rtsp://publisher:publisher-pass@127.0.0.1:8554/avatar/${SESSION_ID}/in"
+```
+
+**3) Play `/out`** (viewer credentials):
+
+```bash
+ffplay -rtsp_transport tcp \
+  "rtsp://viewer:viewer-pass@127.0.0.1:8554/avatar/${SESSION_ID}/out"
+```
+
+If publish still returns `400`, turn on `logLevel: debug` in `mediamtx/mediamtx.yml`, retry once, and inspect `docker compose logs mediamtx` for the exact RTSP rejection reason.
+
+**4) WHIP publish (matches MediaMTX docs; needs FFmpeg with `whip` muxer)** — often preferable to RTSP for WebRTC paths:
+
+```bash
+ffmpeg -re -f lavfi -i testsrc=size=1280x720:rate=30 \
+  -f lavfi -i "sine=frequency=1000:sample_rate=48000" \
+  -c:v libx264 -pix_fmt yuv420p -preset ultrafast -b:v 600k \
+  -c:a libopus -ar 48000 -ac 2 -b:a 128k \
+  -f whip "http://publisher:publisher-pass@localhost:8889/avatar/${SESSION_ID}/in/whip"
+```
+
 ## 3. Client integration notes (C++)
 
 - Publish to `publish.whip_url` with Basic Auth (`publish.username/password`).

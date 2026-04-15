@@ -1,4 +1,6 @@
-FROM golang:1.24-alpine AS builder
+# Default: AWS Public ECR mirror of Docker Official (avoids flaky registry-1.docker.io). Override: --build-arg GOLANG_IMAGE=golang:1.24-alpine
+ARG GOLANG_IMAGE=public.ecr.aws/docker/library/golang:1.24-alpine
+FROM ${GOLANG_IMAGE} AS builder
 
 WORKDIR /src
 

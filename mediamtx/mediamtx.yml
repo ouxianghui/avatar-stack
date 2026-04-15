@@ -12,29 +12,37 @@ authMethod: internal
 # authMethod: http
 # authHTTPAddress: http://session-api:8080/internal/mediamtx/auth
 authInternalUsers:
+  - user: any
+    pass: ""
+    ips: []
+    permissions:
+      - action: api
+      - action: metrics
+
   - user: publisher
     pass: publisher-pass
     permissions:
       - action: publish
-        path: ~^avatar/[^/]+/in$
+        # Quote: bare "~" is YAML null; tilde-prefix regex must be a string.
+        path: "~^avatar/[^/]+/in$"
 
   - user: viewer
     pass: viewer-pass
     permissions:
       - action: read
-        path: ~^avatar/[^/]+/out$
+        path: "~^avatar/[^/]+/out$"
 
   - user: worker
     pass: worker-pass
     permissions:
       - action: read
-        path: ~^avatar/[^/]+/in$
+        path: "~^avatar/[^/]+/in$"
       - action: publish
-        path: ~^avatar/[^/]+/out$
+        path: "~^avatar/[^/]+/out$"
 
   - user: api
     pass: api-pass
-    ips: ['127.0.0.1', '::1']
+    ips: []
     permissions:
       - action: api
       - action: metrics
@@ -59,13 +67,19 @@ webrtcICEServers2:
 
 rtsp: yes
 rtspAddress: :8554
-rtspTransport: [tcp, udp]
+rtspAuthMethods: [basic]
+rtspTransports: [tcp, udp]
+
+# Apply pathDefaults to any path not matched elsewhere (matches upstream default layout).
+paths:
+  all_others: {}
 
 pathDefaults:
   source: publisher
   sourceOnDemand: no
-  # Example production hooks:
-  # runOnReady: curl -s -X POST "http://session-api:8080/internal/mediamtx/hooks/on-ready?path=$MTX_PATH"
-  # runOnNotReady: curl -s -X POST "http://session-api:8080/internal/mediamtx/hooks/on-not-ready?path=$MTX_PATH"
-  # runOnRead: curl -s -X POST "http://session-api:8080/internal/mediamtx/hooks/on-read?path=$MTX_PATH"
-  # runOnUnread: curl -s -X POST "http://session-api:8080/internal/mediamtx/hooks/on-unread?path=$MTX_PATH"
+  # Notify session-api (MediaMTX expands $MTX_PATH before exec). Requires an image with curl (see mediamtx/Dockerfile).
+  # Avoid curl -f: HTTP errors should not make the hook command exit non-zero.
+  runOnReady: curl -sS -X POST "http://session-api:8080/internal/mediamtx/hooks/on-ready?path=$MTX_PATH"
+  runOnNotReady: curl -sS -X POST "http://session-api:8080/internal/mediamtx/hooks/on-not-ready?path=$MTX_PATH"
+  runOnRead: curl -sS -X POST "http://session-api:8080/internal/mediamtx/hooks/on-read?path=$MTX_PATH"
+  runOnUnread: curl -sS -X POST "http://session-api:8080/internal/mediamtx/hooks/on-unread?path=$MTX_PATH"

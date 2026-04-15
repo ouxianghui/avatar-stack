@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WHEP Test Player</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .row { margin-bottom: 10px; display: flex; gap: 10px; align-items: center; }
+    label { min-width: 120px; }
+    input[type="text"], input[type="password"] { width: 520px; max-width: 90vw; }
+    button { padding: 6px 12px; }
+    video { width: min(960px, 90vw); background: #111; margin-top: 12px; }
+    pre { background: #f4f4f4; padding: 10px; max-width: min(960px, 90vw); overflow: auto; }
+  </style>
+</head>
+<body>
+  <h2>MediaMTX WHEP Test</h2>
+  <p style="color:#444;font-size:14px;max-width:min(960px,90vw);line-height:1.45">
+    Use <strong>http://localhost:…</strong> (e.g. <code>python3 -m http.server</code> in this folder), not <code>file://</code>.
+    <code>POST /sessions</code>, then <strong>WHIP</strong> <code>…/avatar/&lt;id&gt;/in/whip</code> (same <code>id</code> as here), then <strong>WHEP</strong> <code>…/out/whip</code> — otherwise MediaMTX may return <code>404</code> on <code>/out</code>.
+    <code>?session=&lt;uuid&gt;</code> pre-fills the WHEP URL and the WHIP hint below.
+  </p>
+  <p id="whipHint" style="display:none;color:#064;font-size:14px;max-width:min(960px,90vw);word-break:break-all"></p>
+
+  <div class="row">
+    <label for="url">WHEP URL</label>
+    <input id="url" type="text" value="" placeholder="http://localhost:8889/avatar/&lt;session_id&gt;/out/whep" />
+  </div>
+  <div class="row">
+    <label for="user">Username</label>
+    <input id="user" type="text" value="viewer" />
+  </div>
+  <div class="row">
+    <label for="pass">Password</label>
+    <input id="pass" type="password" value="viewer-pass" />
+  </div>
+  <div class="row">
+    <button id="start">Start WHEP</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+
+  <video id="video" autoplay playsinline controls muted></video>
+  <pre id="log"></pre>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const logEl = $("log");
+    const videoEl = $("video");
+    const startBtn = $("start");
+    const stopBtn = $("stop");
+
+    let pc = null;
+    let sessionUrl = null;
+
+    function log(msg) {
+      const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.textContent += `${line}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(line);
+    }
+
+    function basicAuthHeader(user, pass) {
+      if (!user && !pass) return null;
+      return `Basic ${btoa(`${user}:${pass}`)}`;
+    }
+
+    function parseSessionIdFromWhepUrl(whepUrl) {
+      try {
+        const u = new URL(whepUrl);
+        const m = u.pathname.match(/\/avatar\/([0-9a-f-]{36})\/out\/whep\/?$/i);
+        return m ? m[1] : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function formatNoStreamHelp(whepUrl, errText) {
+      const sid = parseSessionIdFromWhepUrl(whepUrl);
+      const whip = sid
+        ? `WHIP first (same session): http://localhost:8889/avatar/${sid}/in/whip`
+        : "WHIP first: http://localhost:8889/avatar/<session_id>/in/whip (id must match this WHEP URL).";
+      return (
+        `${errText}\n\n` +
+        `${whip}\n` +
+        "/out is published by the stack worker after /in is live; if WHIP is up, check worker and mediamtx logs."
+      );
+    }
+
+    function updateWhipHintFromUrl() {
+      const hint = $("whipHint");
+      const whepUrl = $("url").value.trim();
+      const sid = parseSessionIdFromWhepUrl(whepUrl);
+      if (!sid) {
+        hint.style.display = "none";
+        hint.textContent = "";
+        return;
+      }
+      hint.style.display = "block";
+      hint.innerHTML =
+        `<strong>WHIP (before WHEP):</strong> <code>http://localhost:8889/avatar/${sid}/in/whip</code>`;
+    }
+
+    async function start() {
+      if (pc) {
+        log("Already running.");
+        return;
+      }
+
+      const whepUrl = $("url").value.trim();
+      const user = $("user").value;
+      const pass = $("pass").value;
+      const auth = basicAuthHeader(user, pass);
+
+      if (!whepUrl) {
+        log("WHEP URL is required.");
+        return;
+      }
+
+      pc = new RTCPeerConnection();
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+
+      pc.oniceconnectionstatechange = () => log(`ICE state: ${pc.iceConnectionState}`);
+      pc.onconnectionstatechange = () => log(`PC state: ${pc.connectionState}`);
+
+      pc.ontrack = (ev) => {
+        if (!videoEl.srcObject) {
+          videoEl.srcObject = new MediaStream();
+        }
+        videoEl.srcObject.addTrack(ev.track);
+        log(`Track received: kind=${ev.track.kind}`);
+      };
+
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const headers = { "Content-Type": "application/sdp" };
+        if (auth) headers["Authorization"] = auth;
+
+        const res = await fetch(whepUrl, {
+          method: "POST",
+          headers,
+          body: offer.sdp,
+        });
+
+        if (!res.ok) {
+          const body = await res.text();
+          let msg = `WHEP POST failed ${res.status}: ${body}`;
+          if (
+            res.status === 404 &&
+            /no stream is available on path/i.test(body) &&
+            /\/out/.test(body)
+          ) {
+            msg = formatNoStreamHelp(whepUrl, msg);
+          }
+          throw new Error(msg);
+        }
+
+        const location = res.headers.get("Location");
+        sessionUrl = location ? new URL(location, whepUrl).toString() : null;
+        if (sessionUrl) log(`WHEP session: ${sessionUrl}`);
+
+        const answerSdp = await res.text();
+        await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+        log("WHEP connected.");
+
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      } catch (err) {
+        log(`Start error: ${err.message}`);
+        await stop();
+      }
+    }
+
+    async function stop() {
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+
+      if (videoEl.srcObject) {
+        for (const t of videoEl.srcObject.getTracks()) t.stop();
+        videoEl.srcObject = null;
+      }
+
+      const user = $("user").value;
+      const pass = $("pass").value;
+      const auth = basicAuthHeader(user, pass);
+      if (sessionUrl) {
+        try {
+          const headers = {};
+          if (auth) headers["Authorization"] = auth;
+          await fetch(sessionUrl, { method: "DELETE", headers });
+          log("WHEP session deleted.");
+        } catch (err) {
+          log(`Session delete warning: ${err.message}`);
+        }
+      }
+
+      sessionUrl = null;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    startBtn.addEventListener("click", start);
+    stopBtn.addEventListener("click", stop);
+    $("url").addEventListener("input", updateWhipHintFromUrl);
+    window.addEventListener("beforeunload", () => { if (pc || sessionUrl) stop(); });
+
+    (function applySessionQuery() {
+      const sid = new URLSearchParams(location.search).get("session");
+      if (!sid || !/^[0-9a-f-]{36}$/i.test(sid.trim())) return;
+      const id = sid.trim();
+      const el = $("url");
+      if (!el.value.trim()) {
+        el.value = `http://localhost:8889/avatar/${id}/out/whep`;
+      }
+      updateWhipHintFromUrl();
+    })();
+  </script>
+</body>
+</html>
