@@ -15,6 +15,8 @@ services:
     environment:
       SOULX_DRY_RUN: ${SOULX_DRY_RUN:-0}
       SOULX_REPO_ROOT: /app/third_party/SoulX-FlashHead
+      SOULX_MODEL_TYPE: ${SOULX_MODEL_TYPE:-lite}
+      SOULX_COND_IMAGE: ${SOULX_COND_IMAGE:-/app/third_party/SoulX-FlashHead/examples/girl.png}
       SOULX_CKPT_DIR: ${SOULX_CKPT_DIR:-/app/third_party/SoulX-FlashHead/models/SoulX-FlashHead-1_3B}
       SOULX_WAV2VEC_DIR: ${SOULX_WAV2VEC_DIR:-/app/third_party/SoulX-FlashHead/models/wav2vec2-base-960h}
       TORCHDYNAMO_DISABLE: ${TORCHDYNAMO_DISABLE:-1}

@@ -23,6 +23,10 @@
   </p>
 
   <div class="row">
+    <label for="sessionId">Session ID</label>
+    <input id="sessionId" type="text" value="" placeholder="cf42e341-70a6-4dc2-a365-1697e69641c3" />
+  </div>
+  <div class="row">
     <label for="url">WHIP URL</label>
     <input id="url" type="text" value="" placeholder="http://localhost:8889/avatar/&lt;session_id&gt;/in/whip" />
   </div>
@@ -57,6 +61,39 @@
     let stream = null;
     let sessionUrl = null;
 
+    function normalizeSid(s) {
+      return String(s || "").trim();
+    }
+
+    function sidLooksUuid(sid) {
+      return /^[0-9a-f-]{36}$/i.test(sid);
+    }
+
+    function buildWhipUrlFromSid(sid) {
+      return `http://localhost:8889/avatar/${sid}/in/whip`;
+    }
+
+    function parseSidFromWhipUrl(whipUrl) {
+      try {
+        const u = new URL(whipUrl);
+        const m = u.pathname.match(/\/avatar\/([0-9a-f-]{36})\/in\/whip\/?$/i);
+        return m ? m[1] : "";
+      } catch {
+        return "";
+      }
+    }
+
+    function syncUrlFromSession() {
+      const sid = normalizeSid($("sessionId").value);
+      if (!sidLooksUuid(sid)) return;
+      $("url").value = buildWhipUrlFromSid(sid);
+    }
+
+    function syncSessionFromUrl() {
+      const sid = parseSidFromWhipUrl($("url").value.trim());
+      if (sid) $("sessionId").value = sid;
+    }
+
     function log(msg) {
       const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
       logEl.textContent += `${line}\n`;
@@ -84,14 +121,20 @@
         return;
       }
 
-      const whipUrl = $("url").value.trim();
+      let whipUrl = $("url").value.trim();
       const user = $("user").value;
       const pass = $("pass").value;
       const auth = basicAuthHeader(user, pass);
 
       if (!whipUrl) {
-        log("WHIP URL is required.");
-        return;
+        const sid = normalizeSid($("sessionId").value);
+        if (sidLooksUuid(sid)) {
+          whipUrl = buildWhipUrlFromSid(sid);
+          $("url").value = whipUrl;
+        } else {
+          log("Session ID or WHIP URL is required.");
+          return;
+        }
       }
 
       try {
@@ -174,15 +217,19 @@
 
     startBtn.addEventListener("click", start);
     stopBtn.addEventListener("click", stop);
+    $("sessionId").addEventListener("input", syncUrlFromSession);
+    $("url").addEventListener("input", syncSessionFromUrl);
     window.addEventListener("beforeunload", () => { if (pc || sessionUrl) stop(); });
 
     (function applySessionQuery() {
       const sid = new URLSearchParams(location.search).get("session");
-      if (!sid || !/^[0-9a-f-]{36}$/i.test(sid.trim())) return;
+      if (!sid || !sidLooksUuid(sid.trim())) return;
       const id = sid.trim();
-      const el = $("url");
-      if (!el.value.trim()) {
-        el.value = `http://localhost:8889/avatar/${id}/in/whip`;
+      if (!$("sessionId").value.trim()) {
+        $("sessionId").value = id;
+      }
+      if (!$("url").value.trim()) {
+        $("url").value = buildWhipUrlFromSid(id);
       }
     })();
   </script>

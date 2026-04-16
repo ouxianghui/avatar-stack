@@ -32,6 +32,8 @@ services:
     build:
       context: ./mediamtx
       dockerfile: Dockerfile
+      args:
+        MEDIAMTX_IMAGE: ${MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.17.1-ffmpeg}
     image: avatar-mediamtx:1.17.1
     container_name: avatar-mediamtx
     restart: unless-stopped

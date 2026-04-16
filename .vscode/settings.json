@@ -1,3 +1,7 @@
 {
-  "go.goroot": "${env:HOME}/sdk/go"
+  "go.goroot": "${env:HOME}/sdk/go",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/worker",
+    "${workspaceFolder}/worker/third_party/SoulX-FlashHead"
+  ]
 }

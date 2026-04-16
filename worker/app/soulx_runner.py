@@ -6,6 +6,11 @@ relative to the process cwd; this module changes into the repo root before impor
 
 Set ``SOULX_DRY_RUN=1`` (default) to keep a idle loop without loading PyTorch (slim / CPU images).
 For real inference use ``Dockerfile.soulx``, mount model weights, and set ``SOULX_DRY_RUN=0``.
+
+Streaming layout (aligned with ``gradio_app_streaming.py``): a **slice feeder** thread turns RTSP PCM
+into fixed-length slices; an **inference worker** thread runs ``get_audio_embedding`` + ``run_pipeline``
+per slice and enqueues video chunks; the **main thread** writes RGB frames to ffmpeg, which publishes RTSP
+to MediaMTX while inference continues on the next chunk.
 """
 
 from __future__ import annotations
@@ -100,7 +105,6 @@ def _run_rtsp_flashhead(
     cond_image = os.getenv("SOULX_COND_IMAGE", "").strip()
     work = Path(os.getenv("SOULX_WORK_DIR", "/tmp/soulx-worker")).resolve() / session_id
     work.mkdir(parents=True, exist_ok=True)
-    cond_path = Path(cond_image) if cond_image else work / "cond.png"
 
     prev_cwd = os.getcwd()
     sys.path.insert(0, str(repo_root))
@@ -124,9 +128,18 @@ def _run_rtsp_flashhead(
             run_pipeline,
         )
 
-        if not cond_image:
-            logger.info("extracting condition frame from input RTSP to %s", cond_path)
-            _run_ffmpeg_cond_frame(input_rtsp, cond_path)
+        if cond_image:
+            cond_path = Path(cond_image)
+            logger.info("using condition image from SOULX_COND_IMAGE=%s", cond_path)
+        else:
+            default_cond = repo_root / "examples" / "girl.png"
+            if default_cond.is_file():
+                cond_path = default_cond
+                logger.info("using default condition image %s", cond_path)
+            else:
+                cond_path = work / "cond.png"
+                logger.info("extracting condition frame from input RTSP to %s", cond_path)
+                _run_ffmpeg_cond_frame(input_rtsp, cond_path)
 
         logger.info("loading pipeline model_type=%s ckpt=%s wav2vec=%s", model_type, ckpt_dir, wav2vec_dir)
         pipeline = get_pipeline(world_size=1, ckpt_dir=ckpt_dir, model_type=model_type, wav2vec_dir=wav2vec_dir)
@@ -174,6 +187,9 @@ def _run_rtsp_flashhead(
         reader = threading.Thread(target=_pcm_reader_thread, args=(audio_proc, pcm_queue, stop_reader), daemon=True)
         reader.start()
 
+        out_audio_codec = os.getenv("SOULX_OUT_AUDIO_CODEC", "copy").strip() or "copy"
+        logger.info("output audio codec=%s (for WHEP, copy/opus is recommended over aac)", out_audio_codec)
+
         out_cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -207,9 +223,7 @@ def _run_rtsp_flashhead(
             "-pix_fmt",
             "yuv420p",
             "-c:a",
-            "aac",
-            "-ar",
-            str(sample_rate),
+            out_audio_codec,
             "-shortest",
             "-f",
             "rtsp",
@@ -218,8 +232,77 @@ def _run_rtsp_flashhead(
         out_proc = subprocess.Popen(out_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         assert out_proc.stdin is not None
 
-        audio_dq: deque[float] = deque([0.0] * cached_audio_length_sum, maxlen=cached_audio_length_sum)
-        pcm_buf = bytearray()
+        slice_q_max = max(1, int(os.getenv("SOULX_SLICE_QUEUE_MAX", "6")))
+        # Unbounded by default: avoids deadlock if output ffmpeg dies while inference blocks on res_queue.put.
+        _rq = os.getenv("SOULX_RESULT_QUEUE_MAX", "").strip()
+        res_queue: queue.Queue[tuple[int, np.ndarray] | None] = (
+            queue.Queue(maxsize=max(1, int(_rq))) if _rq else queue.Queue()
+        )
+        slice_queue: queue.Queue[np.ndarray | None] = queue.Queue(maxsize=slice_q_max)
+        stop_feeder = threading.Event()
+
+        need_bytes = human_speech_array_slice_len * 2
+
+        def slice_feeder() -> None:
+            """PCM → float32 slices (same chunking as gradio_app_streaming)."""
+            pcm_buf = bytearray()
+            while not stop_feeder.is_set():
+                try:
+                    while True:
+                        pcm_buf.extend(pcm_queue.get_nowait())
+                except queue.Empty:
+                    pass
+
+                while len(pcm_buf) >= need_bytes:
+                    block = bytes(pcm_buf[:need_bytes])
+                    del pcm_buf[:need_bytes]
+                    samples = np.frombuffer(block, dtype=np.int16).astype(np.float32) / 32768.0
+                    slice_queue.put(samples.copy())
+
+                if audio_proc.poll() is not None:
+                    if 0 < len(pcm_buf) < need_bytes:
+                        pcm_buf.extend(b"\x00" * (need_bytes - len(pcm_buf)))
+                    if len(pcm_buf) >= need_bytes:
+                        block = bytes(pcm_buf[:need_bytes])
+                        del pcm_buf[:need_bytes]
+                        samples = np.frombuffer(block, dtype=np.int16).astype(np.float32) / 32768.0
+                        slice_queue.put(samples.copy())
+                    slice_queue.put(None)
+                    logger.info("slice_feeder: RTSP audio demux ended")
+                    return
+
+                time.sleep(0.005)
+
+            slice_queue.put(None)
+
+        def inference_worker() -> None:
+            """Same per-chunk loop as gradio_app_streaming.inference_worker (ordered chunks)."""
+            audio_dq: deque[float] = deque([0.0] * cached_audio_length_sum, maxlen=cached_audio_length_sum)
+            chunk_idx = 0
+            while True:
+                sl = slice_queue.get()
+                if sl is None:
+                    break
+                audio_dq.extend(sl.tolist())
+                audio_array = np.array(audio_dq, dtype=np.float32)
+                audio_embedding = get_audio_embedding(pipeline, audio_array, audio_start_idx, audio_end_idx)
+                if audio_embedding is None:
+                    logger.error("get_audio_embedding returned None chunk=%s", chunk_idx)
+                    continue
+                t0 = time.time()
+                video = run_pipeline(pipeline, audio_embedding)
+                video = video[motion_frames_num:]
+                torch.cuda.synchronize()
+                chunk_np = video.cpu().numpy().astype(np.uint8)
+                logger.info("infer chunk=%s wall=%.2fs frames=%s", chunk_idx, time.time() - t0, chunk_np.shape[0])
+                res_queue.put((chunk_idx, chunk_np))
+                chunk_idx += 1
+            res_queue.put(None)
+
+        feeder_t = threading.Thread(target=slice_feeder, name="soulx-slice-feeder", daemon=True)
+        infer_t = threading.Thread(target=inference_worker, name="soulx-infer", daemon=False)
+        feeder_t.start()
+        infer_t.start()
 
         try:
             while True:
@@ -232,33 +315,29 @@ def _run_rtsp_flashhead(
                     break
 
                 try:
-                    pcm_buf.extend(pcm_queue.get_nowait())
+                    item = res_queue.get(timeout=0.5)
                 except queue.Empty:
-                    time.sleep(0.01)
                     continue
 
-                need = human_speech_array_slice_len * 2
-                while len(pcm_buf) >= need:
-                    block = pcm_buf[:need]
-                    del pcm_buf[:need]
-                    samples = np.frombuffer(bytes(block), dtype=np.int16).astype(np.float32) / 32768.0
-                    audio_dq.extend(samples.tolist())
-                    audio_array = np.array(audio_dq, dtype=np.float32)
-                    audio_embedding = get_audio_embedding(pipeline, audio_array, audio_start_idx, audio_end_idx)
-                    if audio_embedding is None:
-                        logger.error("get_audio_embedding returned None")
-                        continue
-                    video = run_pipeline(pipeline, audio_embedding)
-                    video = video[motion_frames_num:]
-                    chunk = video.cpu().numpy().astype(np.uint8)
-                    if chunk.size == 0:
-                        continue
-                    for i in range(chunk.shape[0]):
-                        frame = chunk[i, :, :, :]
-                        if frame.shape[-1] == 3:
-                            out_proc.stdin.write(frame.tobytes())
-                    out_proc.stdin.flush()
+                if item is None:
+                    break
+
+                _, chunk = item
+                if chunk.size == 0:
+                    continue
+                for i in range(chunk.shape[0]):
+                    frame = chunk[i, :, :, :]
+                    if frame.shape[-1] == 3:
+                        out_proc.stdin.write(frame.tobytes())
+                out_proc.stdin.flush()
         finally:
+            stop_feeder.set()
+            try:
+                slice_queue.put_nowait(None)
+            except queue.Full:
+                pass
+            feeder_t.join(timeout=5)
+            infer_t.join(timeout=600)
             stop_reader.set()
             try:
                 audio_proc.terminate()
