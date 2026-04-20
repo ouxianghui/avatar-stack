@@ -18,7 +18,7 @@
   <h2>MediaMTX WHIP Push Test</h2>
   <p style="color:#444;font-size:14px;max-width:min(960px,92vw);line-height:1.45">
     Open this page over <strong>http://</strong> (e.g. run <code>python3 -m http.server 8765</code> in the <code>tools</code> folder), not <code>file://</code> — otherwise the browser may block camera/mic and WHIP will not publish.
-    Use the <strong>exact same session_id</strong> as in your WHEP URL (copy both from one <code>POST /sessions</code> response). Keep WHIP running before starting WHEP.
+    Use the <strong>exact same session_id</strong> as in your WHEP URL (copy both from one <code>POST /sessions</code> response). Paste <strong>publish.password</strong> from that JSON as the password (short-lived token). Keep WHIP running before starting WHEP.
     Optional: open with <code>?session=&lt;uuid&gt;</code> to fill the URL automatically.
   </p>
 
@@ -28,7 +28,7 @@
   </div>
   <div class="row">
     <label for="url">WHIP URL</label>
-    <input id="url" type="text" value="" placeholder="http://localhost:8889/avatar/&lt;session_id&gt;/in/whip" />
+    <input id="url" type="text" value="" placeholder="http://localhost:8889/avatar/&lt;session_id&gt;/live/whip" />
   </div>
   <div class="row">
     <label for="user">Username</label>
@@ -36,7 +36,7 @@
   </div>
   <div class="row">
     <label for="pass">Password</label>
-    <input id="pass" type="password" value="publisher-pass" />
+    <input id="pass" type="password" value="" placeholder="publish.password from POST /sessions" />
   </div>
   <div class="row">
     <label><input id="sendAudio" type="checkbox" checked /> Send audio</label>
@@ -70,13 +70,13 @@
     }
 
     function buildWhipUrlFromSid(sid) {
-      return `http://localhost:8889/avatar/${sid}/in/whip`;
+      return `http://localhost:8889/avatar/${sid}/live/whip`;
     }
 
     function parseSidFromWhipUrl(whipUrl) {
       try {
         const u = new URL(whipUrl);
-        const m = u.pathname.match(/\/avatar\/([0-9a-f-]{36})\/in\/whip\/?$/i);
+        const m = u.pathname.match(/\/avatar\/([0-9a-f-]{36})\/live\/whip\/?$/i);
         return m ? m[1] : "";
       } catch {
         return "";

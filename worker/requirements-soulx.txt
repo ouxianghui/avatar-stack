@@ -1,3 +1,0 @@
-# Worker + SoulX-FlashHead (GPU). Install PyTorch with CUDA first; see Dockerfile.soulx.
-redis==5.2.1
--r third_party/SoulX-FlashHead/requirements.txt

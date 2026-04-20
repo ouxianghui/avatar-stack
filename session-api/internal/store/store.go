@@ -9,7 +9,7 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
-// Store abstracts persistence + queue side-effects.
+// Store abstracts persistence.
 // Current implementation is Redis, but service layer only depends on this interface.
 type Store interface {
 	// Ping validates backend availability for health checks.
@@ -18,10 +18,8 @@ type Store interface {
 	PutSession(ctx context.Context, session *model.Session) error
 	// GetSession fetches one session by ID.
 	GetSession(ctx context.Context, sessionID string) (*model.Session, error)
-	// PublishStart enqueues one start command for worker supervisor.
-	PublishStart(ctx context.Context, payload model.StartQueueMessage) error
-	// PublishStop enqueues one stop command for worker supervisor.
-	PublishStop(ctx context.Context, payload model.StopQueueMessage) error
+	// DeleteSession removes one session record (revokes tokens).
+	DeleteSession(ctx context.Context, sessionID string) error
 	// Close releases backend resources.
 	Close() error
 }

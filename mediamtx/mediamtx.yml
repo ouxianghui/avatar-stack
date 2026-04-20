@@ -6,46 +6,14 @@ apiAddress: :9997
 metrics: yes
 metricsAddress: :9998
 
-# Current default uses internal static credentials for easy local startup.
-# For production, switch to authMethod: http and delegate policy to session-api.
-authMethod: internal
-# authMethod: http
-# authHTTPAddress: http://session-api:8080/internal/mediamtx/auth
-authInternalUsers:
-  - user: any
-    pass: ""
-    ips: []
-    permissions:
-      - action: api
-      - action: metrics
-
-  - user: publisher
-    pass: publisher-pass
-    permissions:
-      - action: publish
-        # Quote: bare "~" is YAML null; tilde-prefix regex must be a string.
-        path: "~^avatar/[^/]+/in$"
-
-  - user: viewer
-    pass: viewer-pass
-    permissions:
-      - action: read
-        path: "~^avatar/[^/]+/out$"
-
-  - user: worker
-    pass: worker-pass
-    permissions:
-      - action: read
-        path: "~^avatar/[^/]+/in$"
-      - action: publish
-        path: "~^avatar/[^/]+/out$"
-
-  - user: api
-    pass: api-pass
-    ips: []
-    permissions:
-      - action: api
-      - action: metrics
+# Delegate stream auth to session-api (short-lived tokens issued per POST /sessions).
+# api/metrics/pprof are excluded from HTTP auth (see authHTTPExclude); do not expose :9997 publicly.
+authMethod: http
+authHTTPAddress: http://session-api:8080/internal/mediamtx/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
 
 webrtc: yes
 webrtcAddress: :8889

@@ -2,15 +2,14 @@
 
 ## 1. Responsibility
 
-`session-api` is the control plane of the avatar session system.
+`session-api` is the control plane of the streaming router.
 
 It does not move media packets. It manages:
 
 - session lifecycle
 - session metadata and state
-- worker start/stop orchestration
-- MediaMTX auth callback decisions
-- MediaMTX hook event ingestion
+- opaque **publish/playback tokens** (bcrypt hashes in Redis; plaintext only in `POST /sessions` response)
+- MediaMTX HTTP auth (`/internal/mediamtx/auth`) and hook ingestion
 
 ## 2. Package Layout
 
@@ -18,7 +17,7 @@ It does not move media packets. It manages:
 - `internal/config`: environment-driven runtime config.
 - `internal/httpapi`: HTTP routing and request/response handling.
 - `internal/service`: business logic and state transitions.
-- `internal/store`: persistence and queue interface + Redis implementation.
+- `internal/store`: persistence interface + Redis implementation.
 - `internal/model`: shared domain models and DTO definitions.
 
 ## 3. Dependency Direction
@@ -45,13 +44,7 @@ It does not move media packets. It manages:
 
 Each session is stored as a JSON snapshot in Redis with TTL.
 
-Worker orchestration uses two Redis lists:
-
-- start queue
-- stop queue
-
 ## 6. Evolution Path
 
 Current version uses static credentials for MediaMTX auth decisions.
 Next production step is token/JWT policy per session and per role.
-

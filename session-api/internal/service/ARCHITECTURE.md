@@ -2,26 +2,15 @@
 
 ## Scope
 
-Implements business rules and orchestration.
+Business rules and orchestration for sessions and MediaMTX callbacks.
 
-This module is the core of control-plane behavior.
+## Key Methods
 
-## Core Use Cases
+- `CreateSession`: initialize state in Redis.
+- `StopSession`: mark stopping.
+- `HandleMediaHook`: map MediaMTX events to session fields.
+- `Authorize`: validate static credentials for WHIP/WHEP paths.
 
-- `CreateSession`: initialize state and enqueue worker start.
-- `GetSession`: return current snapshot.
-- `StopSession`: mark stopping and enqueue worker stop.
-- `HandleMediaHook`: apply state transitions from MediaMTX events.
-- `Authorize`: enforce role/path/action credential policy.
+## Design Notes
 
-## State Transition Inputs
-
-1. API command (`create`, `stop`)
-2. MediaMTX hook event (`on-ready`, `on-not-ready`, `on-read`, `on-unread`)
-
-## Why Service Layer Exists
-
-- Keep handlers thin.
-- Keep storage replaceable.
-- Keep business policy testable without HTTP stack.
-
+Service is intentionally thin: no media protocol handling, only coordination and policy.

@@ -37,8 +37,6 @@ func main() {
 		cfg.RedisURL,
 		cfg.SessionKeyPrefix,
 		cfg.SessionTTL,
-		cfg.StartQueue,
-		cfg.StopQueue,
 	)
 	if err != nil {
 		logger.Error("failed to init redis store", "error", err)

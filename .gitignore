@@ -6,7 +6,7 @@
 ._*
 
 # Custom folder icons
-Icon
+Icon
 
 # Volume root files
 .DocumentRevisions-V100
@@ -30,6 +30,10 @@ Icon
 
 # Built Visual Studio Code Extensions
 *.vsix
+
+### Removed components
+# Worker stack was removed from the repository; ignore any leftover checkout.
+/worker/
 
 ### Go
 # Binaries for programs and plugins

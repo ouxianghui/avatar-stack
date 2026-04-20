@@ -7,17 +7,8 @@ import (
 )
 
 // sessionPathPattern recognizes canonical media paths:
-// avatar/{session_id}/in
-// avatar/{session_id}/out
-var sessionPathPattern = regexp.MustCompile(`^avatar/([^/]+)/(in|out)$`)
-
-// StreamDirection identifies whether a path is ingest or egress.
-type StreamDirection string
-
-const (
-	DirectionIn  StreamDirection = "in"
-	DirectionOut StreamDirection = "out"
-)
+// avatar/{session_id}/live
+var sessionPathPattern = regexp.MustCompile(`^avatar/([^/]+)/live$`)
 
 // MediaMTXAuthRequest is a normalized view of MediaMTX auth callback payload.
 type MediaMTXAuthRequest struct {
@@ -31,7 +22,7 @@ type MediaMTXAuthRequest struct {
 }
 
 // NormalizePath accepts URL/path variants from callbacks and converts them
-// into canonical path format: avatar/{session_id}/{in|out}
+// into canonical path format: avatar/{session_id}/live
 func NormalizePath(raw string) string {
 	path := strings.TrimSpace(raw)
 	if path == "" {
@@ -56,14 +47,14 @@ func NormalizePath(raw string) string {
 	return path
 }
 
-// ParseSessionPath extracts session_id and direction from callback path.
+// ParseSessionPath extracts session_id from callback path.
 // It returns ok=false for unrelated paths.
-func ParseSessionPath(raw string) (sessionID string, direction StreamDirection, ok bool) {
+func ParseSessionPath(raw string) (sessionID string, ok bool) {
 	normalized := NormalizePath(raw)
 	matches := sessionPathPattern.FindStringSubmatch(normalized)
-	if len(matches) != 3 {
-		return "", "", false
+	if len(matches) != 2 {
+		return "", false
 	}
 
-	return matches[1], StreamDirection(matches[2]), true
+	return matches[1], true
 }

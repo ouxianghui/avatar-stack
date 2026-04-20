@@ -93,7 +93,7 @@ func (h *Router) getSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, payload)
 }
 
-// stopSession requests worker stop and marks status to stopping.
+// stopSession marks the session as stopping in Redis.
 func (h *Router) stopSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 	payload, err := h.svc.StopSession(r.Context(), sessionID)
@@ -116,7 +116,7 @@ func (h *Router) mediamtxAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req := readMediaMTXAuthRequest(r)
-	if err := h.svc.Authorize(req); err != nil {
+	if err := h.svc.Authorize(r.Context(), req); err != nil {
 		if errors.Is(err, service.ErrUnauthorized) {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -150,23 +150,36 @@ func (h *Router) mediamtxHook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "event": event, "path": model.NormalizePath(path)})
 }
 
-// isIPAllowed checks remote caller against allowlist.
-// Supports either "host:port" or plain host formats.
+// isIPAllowed restricts internal auth/hook endpoints to trusted networks.
+// When AllowedInternalAuthIPs is non-empty, only those exact entries match (IP string or remoteAddr).
+// When empty, loopback and RFC1918/ULA private addresses are allowed (typical Docker Compose).
 func (h *Router) isIPAllowed(remoteAddr string) bool {
-	if len(h.cfg.AllowedInternalAuthIPs) == 0 {
-		return true
+	ip := parseIPFromRemote(remoteAddr)
+	if ip == nil {
+		return false
 	}
 
+	if len(h.cfg.AllowedInternalAuthIPs) > 0 {
+		if _, ok := h.cfg.AllowedInternalAuthIPs[ip.String()]; ok {
+			return true
+		}
+		if _, ok := h.cfg.AllowedInternalAuthIPs[remoteAddr]; ok {
+			return true
+		}
+		return false
+	}
+
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
+func parseIPFromRemote(remoteAddr string) net.IP {
 	host := strings.TrimSpace(remoteAddr)
 	if parsedHost, _, err := net.SplitHostPort(remoteAddr); err == nil {
 		host = parsedHost
 	}
 	host = strings.TrimPrefix(host, "[")
 	host = strings.TrimSuffix(host, "]")
-
-	_, allowedHost := h.cfg.AllowedInternalAuthIPs[host]
-	_, allowedRemote := h.cfg.AllowedInternalAuthIPs[remoteAddr]
-	return allowedHost || allowedRemote
+	return net.ParseIP(host)
 }
 
 // decodeJSONBody decodes strict JSON by rejecting unknown fields.

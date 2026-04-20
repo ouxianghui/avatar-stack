@@ -1,3 +1,0 @@
-[submodule "worker/third_party/SoulX-FlashHead"]
-	path = worker/third_party/SoulX-FlashHead
-	url = https://github.com/Soul-AILab/SoulX-FlashHead.git

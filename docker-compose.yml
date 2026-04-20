@@ -40,6 +40,7 @@ services:
     command: ["/mediamtx.yml"]
     depends_on:
       - coturn
+      - session-api
     volumes:
       - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
     networks:
@@ -59,50 +60,18 @@ services:
     restart: unless-stopped
     depends_on:
       - redis
-      - mediamtx
     networks:
       - avatar-net
     environment:
       REDIS_URL: redis://redis:6379/0
       MEDIAMTX_WEBRTC_BASE_URL: ${MEDIAMTX_WEBRTC_BASE_URL:-http://localhost:8889}
-      MEDIAMTX_RTSP_BASE_URL: rtsp://mediamtx:8554
       WHIP_USERNAME: ${WHIP_USERNAME:-publisher}
-      WHIP_PASSWORD: ${WHIP_PASSWORD:-publisher-pass}
       WHEP_USERNAME: ${WHEP_USERNAME:-viewer}
-      WHEP_PASSWORD: ${WHEP_PASSWORD:-viewer-pass}
-      WORKER_RTSP_USER: ${WORKER_RTSP_USER:-worker}
-      WORKER_RTSP_PASS: ${WORKER_RTSP_PASS:-worker-pass}
-      START_QUEUE: avatar:sessions:start
-      STOP_QUEUE: avatar:sessions:stop
+      MEDIAMTX_TOKEN_TTL: ${MEDIAMTX_TOKEN_TTL:-1h}
+      INTERNAL_AUTH_ALLOWED_IPS: ${INTERNAL_AUTH_ALLOWED_IPS:-}
+      # SESSION_TTL: 24h
     ports:
       - "8080:8080"
-
-  soulx-worker:
-    build:
-      context: ./worker
-    container_name: avatar-soulx-worker
-    restart: unless-stopped
-    depends_on:
-      - redis
-      - mediamtx
-    networks:
-      - avatar-net
-    environment:
-      REDIS_URL: redis://redis:6379/0
-      START_QUEUE: avatar:sessions:start
-      STOP_QUEUE: avatar:sessions:stop
-      WORKER_MODE: ${WORKER_MODE:-passthrough}
-      WORKER_RTSP_USER: ${WORKER_RTSP_USER:-worker}
-      WORKER_RTSP_PASS: ${WORKER_RTSP_PASS:-worker-pass}
-      MEDIAMTX_HOST: mediamtx
-      MEDIAMTX_RTSP_PORT: "8554"
-      MEDIAMTX_CONTROL_API_BASE: http://mediamtx:9997
-      MEDIAMTX_API_USER: api
-      MEDIAMTX_API_PASS: api-pass
-      WAIT_PUBLISHER_TIMEOUT_S: "300"
-      WAIT_PUBLISHER_NO_PUBLISHER_RETRY_S: "15"
-      # SoulX-FlashHead: use Dockerfile.soulx + GPU + model mounts; set to 0 to run inference.
-      SOULX_DRY_RUN: "1"
 
 volumes:
   redis-data:

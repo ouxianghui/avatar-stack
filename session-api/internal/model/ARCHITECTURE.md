@@ -6,15 +6,13 @@ Defines domain models and DTOs shared across layers.
 
 ## Key Types
 
-- `Session`, `SessionStatus`, `WorkerMode`: core domain state.
+- `Session`, `SessionStatus`: core domain state.
 - `SessionPayload`: API response contract.
-- `StartQueueMessage`, `StopQueueMessage`: worker queue contracts.
 - `MediaMTXAuthRequest`: normalized auth callback payload.
 
 ## Path Utilities
 
 `NormalizePath` and `ParseSessionPath` convert callback path variants into
-canonical path identifiers (`avatar/{sessionID}/{in|out}`).
+canonical path identifiers (`avatar/{sessionID}/live`).
 
 This keeps path parsing logic out of handlers and service logic.
-

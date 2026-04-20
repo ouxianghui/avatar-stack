@@ -18,7 +18,7 @@
   <h2>MediaMTX WHEP Test</h2>
   <p style="color:#444;font-size:14px;max-width:min(960px,90vw);line-height:1.45">
     Use <strong>http://localhost:…</strong> (e.g. <code>python3 -m http.server</code> in this folder), not <code>file://</code>.
-    <code>POST /sessions</code>, then <strong>WHIP</strong> <code>…/avatar/&lt;id&gt;/in/whip</code> (same <code>id</code> as here), then <strong>WHEP</strong> <code>…/out/whep</code> — otherwise MediaMTX may return <code>404</code> on <code>/out</code>.
+    <code>POST /sessions</code>, copy <strong>publish.password</strong> / <strong>playback.password</strong> (short-lived tokens), then <strong>WHIP</strong> then <strong>WHEP</strong> on the same path — otherwise MediaMTX may return <code>404</code> until a publisher is present.
     <code>?session=&lt;uuid&gt;</code> pre-fills the WHEP URL and the WHIP hint below.
   </p>
   <p id="whipHint" style="display:none;color:#064;font-size:14px;max-width:min(960px,90vw);word-break:break-all"></p>
@@ -29,7 +29,7 @@
   </div>
   <div class="row">
     <label for="url">WHEP URL</label>
-    <input id="url" type="text" value="" placeholder="http://localhost:8889/avatar/&lt;session_id&gt;/out/whep" />
+    <input id="url" type="text" value="" placeholder="http://localhost:8889/avatar/&lt;session_id&gt;/live/whep" />
   </div>
   <div class="row">
     <label for="user">Username</label>
@@ -37,7 +37,7 @@
   </div>
   <div class="row">
     <label for="pass">Password</label>
-    <input id="pass" type="password" value="viewer-pass" />
+    <input id="pass" type="password" value="" placeholder="playback.password from POST /sessions" />
   </div>
   <div class="row">
     <button id="start">Start WHEP</button>
@@ -84,13 +84,13 @@
     }
 
     function buildWhepUrlFromSid(sid) {
-      return `http://localhost:8889/avatar/${sid}/out/whep`;
+      return `http://localhost:8889/avatar/${sid}/live/whep`;
     }
 
     function parseSessionIdFromWhepUrl(whepUrl) {
       try {
         const u = new URL(whepUrl);
-        const m = u.pathname.match(/\/avatar\/([0-9a-f-]{36})\/out\/whep\/?$/i);
+        const m = u.pathname.match(/\/avatar\/([0-9a-f-]{36})\/live\/whep\/?$/i);
         return m ? m[1] : null;
       } catch {
         return null;
@@ -100,12 +100,12 @@
     function formatNoStreamHelp(whepUrl, errText) {
       const sid = parseSessionIdFromWhepUrl(whepUrl);
       const whip = sid
-        ? `WHIP first (same session): http://localhost:8889/avatar/${sid}/in/whip`
-        : "WHIP first: http://localhost:8889/avatar/<session_id>/in/whip (id must match this WHEP URL).";
+        ? `WHIP first (same session): http://localhost:8889/avatar/${sid}/live/whip`
+        : "WHIP first: http://localhost:8889/avatar/<session_id>/live/whip (id must match this WHEP URL).";
       return (
         `${errText}\n\n` +
         `${whip}\n` +
-        "/out is published by the stack worker after /in is live; if WHIP is up, check worker and mediamtx logs."
+        "WHEP reads the same MediaMTX path as WHIP (/live); start WHIP before WHEP and keep it running."
       );
     }
 
@@ -120,7 +120,7 @@
       }
       hint.style.display = "block";
       hint.innerHTML =
-        `<strong>WHIP (before WHEP):</strong> <code>http://localhost:8889/avatar/${sid}/in/whip</code>`;
+        `<strong>WHIP (before WHEP):</strong> <code>http://localhost:8889/avatar/${sid}/live/whip</code>`;
     }
 
     function syncUrlFromSession() {
@@ -219,7 +219,7 @@
 
         const headers = { "Content-Type": "application/sdp" };
         if (auth) headers["Authorization"] = auth;
-        const retryUntil = Date.now() + 120000; // SoulX first-frame can be slow; retry for up to 2 minutes.
+        const retryUntil = Date.now() + 120000; // Publisher may take time to negotiate; retry WHEP for up to 2 minutes.
         let res;
         while (true) {
           res = await fetch(whepUrl, {
@@ -231,19 +231,18 @@
           if (res.ok) break;
 
           const body = await res.text();
-          const noOutYet =
+          const noStreamYet =
             res.status === 404 &&
-            /no stream is available on path/i.test(body) &&
-            /\/out/.test(body);
+            /no stream is available on path/i.test(body);
 
-          if (noOutYet && Date.now() < retryUntil) {
-            log("No /out stream yet, retrying WHEP in 2s...");
+          if (noStreamYet && Date.now() < retryUntil) {
+            log("No publisher on path yet, retrying WHEP in 2s...");
             await sleep(2000);
             continue;
           }
 
           let msg = `WHEP POST failed ${res.status}: ${body}`;
-          if (noOutYet) {
+          if (noStreamYet) {
             msg = formatNoStreamHelp(whepUrl, msg);
           }
           throw new Error(msg);

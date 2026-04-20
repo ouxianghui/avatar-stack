@@ -9,29 +9,30 @@ func TestParseSessionPath(t *testing.T) {
 		name      string
 		raw       string
 		wantID    string
-		wantDir   StreamDirection
 		wantValid bool
 	}{
 		{
 			name:      "plain path",
-			raw:       "avatar/s1/in",
+			raw:       "avatar/s1/live",
 			wantID:    "s1",
-			wantDir:   DirectionIn,
 			wantValid: true,
 		},
 		{
-			name:      "whip suffix path",
-			raw:       "/avatar/s2/out/whep",
+			name:      "whep suffix path",
+			raw:       "/avatar/s2/live/whep",
 			wantID:    "s2",
-			wantDir:   DirectionOut,
 			wantValid: true,
 		},
 		{
 			name:      "full url",
-			raw:       "https://media.example.com/avatar/s3/in/whip?token=x",
+			raw:       "https://media.example.com/avatar/s3/live/whip?token=x",
 			wantID:    "s3",
-			wantDir:   DirectionIn,
 			wantValid: true,
+		},
+		{
+			name:      "legacy in path rejected",
+			raw:       "avatar/s1/in",
+			wantValid: false,
 		},
 		{
 			name:      "invalid path",
@@ -42,7 +43,7 @@ func TestParseSessionPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotID, gotDir, ok := ParseSessionPath(tt.raw)
+			gotID, ok := ParseSessionPath(tt.raw)
 			if ok != tt.wantValid {
 				t.Fatalf("valid mismatch: got=%v want=%v", ok, tt.wantValid)
 			}
@@ -51,9 +52,6 @@ func TestParseSessionPath(t *testing.T) {
 			}
 			if gotID != tt.wantID {
 				t.Fatalf("session id mismatch: got=%s want=%s", gotID, tt.wantID)
-			}
-			if gotDir != tt.wantDir {
-				t.Fatalf("direction mismatch: got=%s want=%s", gotDir, tt.wantDir)
 			}
 		})
 	}
